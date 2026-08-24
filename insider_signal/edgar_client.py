@@ -69,31 +69,61 @@ class SECEdgarClient:
         self._limiter = _RateLimiter(min_request_interval)
 
     def _get(self, url: str, *, retries: int = 3) -> requests.Response:
+        """네트워크 오류/429/5xx는 재시도하고, 그 외 4xx(404 등)는 영구적 오류로 보고 즉시 raise합니다."""
+
         last_exc: Exception | None = None
         for attempt in range(1, retries + 1):
             self._limiter.wait()
             try:
                 resp = self._session.get(url, timeout=15)
-                if resp.status_code == 429:
-                    wait_s = 1.0 * attempt
-                    logger.warning("SEC EDGAR 429 rate limited, %.1fs 대기 후 재시도: %s", wait_s, url)
-                    time.sleep(wait_s)
-                    continue
-                resp.raise_for_status()
-                return resp
             except requests.RequestException as exc:  # pragma: no cover - 네트워크 예외 경로
                 last_exc = exc
                 logger.warning("SEC EDGAR 요청 실패(%d/%d): %s (%s)", attempt, retries, url, exc)
                 time.sleep(0.5 * attempt)
+                continue
+
+            if resp.status_code == 429:
+                wait_s = 1.0 * attempt
+                logger.warning("SEC EDGAR 429 rate limited, %.1fs 대기 후 재시도: %s", wait_s, url)
+                time.sleep(wait_s)
+                continue
+            if 400 <= resp.status_code < 500:
+                resp.raise_for_status()  # 영구적 오류로 간주, 재시도하지 않고 즉시 전파
+            if resp.status_code >= 500:
+                last_exc = requests.HTTPError(f"{resp.status_code} server error", response=resp)
+                logger.warning("SEC EDGAR 서버 오류(%d/%d): %s", attempt, retries, url)
+                time.sleep(0.5 * attempt)
+                continue
+
+            resp.raise_for_status()
+            return resp
         assert last_exc is not None
         raise last_exc
 
     def get_latest_form4_entries(self, count: int = 100) -> list[FeedEntry]:
+        """최신 Form 4 목록을 조회합니다.
+
+        SEC EDGAR의 ``getcurrent`` atom 피드는 두 가지 특이한 동작을 보입니다 (실제 응답으로 확인함):
+
+        1. ``type=4`` 쿼리 파라미터가 접두어 매칭이라 ``424B3``, ``424B5`` 같은 다른 서식도
+           함께 반환됩니다. 그래서 각 entry의 ``<category label="form type" term="...">``
+           값이 정확히 ``"4"``인 것만 클라이언트에서 다시 걸러냅니다.
+        2. 신고인이 여러 명인 Form 4는 (신고인마다 + 발행사) 여러 entry로 중복 등장하며,
+           같은 accession 번호가 실측 기준 최대 10회 이상 반복될 수 있습니다. 그래서
+           accession_no 기준으로 첫 번째 entry만 남기고 중복 제거합니다.
+        """
+
         url = LATEST_FORM4_FEED_URL.format(count=count)
         resp = self._get(url)
         root = ElementTree.fromstring(resp.content)
         entries: list[FeedEntry] = []
+        seen_accession_nos: set[str] = set()
         for entry_el in root.findall("atom:entry", ATOM_NS):
+            category_el = entry_el.find("atom:category", ATOM_NS)
+            form_type = category_el.get("term", "") if category_el is not None else ""
+            if form_type != "4":
+                continue
+
             link_el = entry_el.find("atom:link", ATOM_NS)
             title_el = entry_el.find("atom:title", ATOM_NS)
             updated_el = entry_el.find("atom:updated", ATOM_NS)
@@ -104,6 +134,10 @@ class SECEdgarClient:
             if parsed is None:
                 continue
             cik, accession_no = parsed
+            if accession_no in seen_accession_nos:
+                continue
+            seen_accession_nos.add(accession_no)
+
             entries.append(
                 FeedEntry(
                     cik=cik,
@@ -116,26 +150,41 @@ class SECEdgarClient:
         return entries
 
     def get_primary_xml_url(self, cik: str, accession_no: str) -> str | None:
+        """accession 폴더 안에서 실제 ownership XML 문서(보통 ``ownership.xml``)를 찾습니다.
+
+        디렉터리 목록은 ``{accession-no-dash}-index.json`` 이 아니라 그냥 ``index.json``
+        (실제 응답으로 확인함)이며, 각 item의 ``type`` 필드는 "4" 같은 서식 코드가 아니라
+        ``"text.gif"`` 같은 아이콘 타입이라 폼타입 매칭에 쓸 수 없습니다. 그래서
+        확장자(.xml)와 이름 패턴만으로 후보를 고릅니다.
+        """
+
         cik_nodash = cik.lstrip("0") or "0"
         accession_nodash = accession_no.replace("-", "")
         index_json_url = (
-            f"https://www.sec.gov/Archives/edgar/data/{cik_nodash}/{accession_nodash}/"
-            f"{accession_no}-index.json"
+            f"https://www.sec.gov/Archives/edgar/data/{cik_nodash}/{accession_nodash}/index.json"
         )
         resp = self._get(index_json_url)
         data = resp.json()
         items = data.get("directory", {}).get("item", [])
 
+        xbrl_linkbase_suffixes = ("_cal.xml", "_def.xml", "_lab.xml", "_pre.xml", "_htm.xml")
+
         def is_candidate(item: dict) -> bool:
-            name = item.get("name", "")
-            return name.lower().endswith(".xml") and "index" not in name.lower()
+            name = item.get("name", "").lower()
+            if not name.endswith(".xml"):
+                return False
+            if "index" in name:
+                return False
+            if name.endswith(xbrl_linkbase_suffixes):
+                return False
+            return True
 
         candidates = [it for it in items if is_candidate(it)]
         if not candidates:
             return None
-        # form type과 정확히 일치하는 문서를 우선 사용 (Form 4 -> type "4")
-        exact = [it for it in candidates if it.get("type") == "4"]
-        chosen = exact[0] if exact else candidates[0]
+        # ownership.xml(또는 유사 명명)을 우선 사용하고, 없으면 첫 후보로 대체.
+        preferred = [it for it in candidates if "ownership" in it["name"].lower()]
+        chosen = preferred[0] if preferred else candidates[0]
         name = chosen["name"]
         return f"https://www.sec.gov/Archives/edgar/data/{cik_nodash}/{accession_nodash}/{name}"
 
@@ -177,8 +226,13 @@ class SECEdgarClient:
 
 
 def _parse_index_href(href: str) -> tuple[str, str] | None:
-    """예: https://www.sec.gov/Archives/edgar/data/320193/000032019324000106-index.htm
-    -> ("320193", "0000320193-24-000106")
+    """실제 관측된 형식: .../Archives/edgar/data/{cik}/{accession_nodash}/{accession-index.htm}
+
+    예: https://www.sec.gov/Archives/edgar/data/1577552/000119312526361711/0001193125-26-361711-index.htm
+    -> ("1577552", "0001193125-26-361711")
+
+    accession_nodash는 두 번째 경로 세그먼트(폴더명) 자체이므로, 세 번째 세그먼트인
+    "...-index.htm" 파일명은 파싱에 사용하지 않습니다.
     """
 
     marker = "/Archives/edgar/data/"
@@ -190,9 +244,7 @@ def _parse_index_href(href: str) -> tuple[str, str] | None:
     if len(parts) < 2:
         return None
     cik = parts[0]
-    accession_part = parts[1]
-    accession_nodash = accession_part.replace("-index.htm", "").replace("-index.html", "")
-    accession_nodash = accession_nodash.split(".")[0]
+    accession_nodash = parts[1]
     if len(accession_nodash) != 18 or not accession_nodash.isdigit():
         return None
     accession_no = f"{accession_nodash[0:10]}-{accession_nodash[10:12]}-{accession_nodash[12:18]}"
