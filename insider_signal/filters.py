@@ -1,0 +1,100 @@
+"""매수 신호 필터링 규칙 (CLAUDE.md의 4가지 규칙 구현).
+
+각 함수는 하나의 규칙만 담당하고, ``evaluate()``가 이들을 조합해 최종 판정을 내립니다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .config import ENTITY_NAME_HINTS, Settings
+from .history import HistoryStore
+from .models import ReportingOwner, Transaction
+
+
+@dataclass(frozen=True)
+class FilterResult:
+    passed: bool
+    reasons_failed: tuple[str, ...]
+
+    def __bool__(self) -> bool:
+        return self.passed
+
+
+def is_open_market_purchase(txn: Transaction) -> bool:
+    """매수(취득) 거래인지 여부. Transaction Code 'P' + Acquired 'A'만 신호로 인정."""
+
+    return txn.is_open_market_purchase
+
+
+def is_within_value_range(txn: Transaction, settings: Settings) -> bool:
+    """요구사항 1: 10만 달러 ~ 50만 달러 거래만 사용."""
+
+    return settings.min_txn_value_usd <= txn.value_usd <= settings.max_txn_value_usd
+
+
+def is_individual(owner: ReportingOwner) -> bool:
+    """요구사항 2: 개인 거래만 사용 (기업/펀드/신탁 등 제외).
+
+    Form 4에는 개인/법인을 직접 구분하는 필드가 없어 휴리스틱으로 판단합니다:
+    이름에 법인 접미사가 포함되면 기업으로 간주해 제외합니다.
+    """
+
+    name_upper = owner.name.upper()
+    return not any(hint in name_upper for hint in ENTITY_NAME_HINTS)
+
+
+def is_officer_or_director(owner: ReportingOwner) -> bool:
+    """요구사항 3: 10% Owner 제외, Officer(CEO/CFO 포함)/Director만 사용."""
+
+    return owner.is_officer or owner.is_director
+
+
+def is_10b5_1_plan_trade(txn: Transaction) -> bool:
+    """요구사항 4-a: Rule 10b5-1 사전 계획 거래는 반복/자동 매수로 간주해 배제."""
+
+    return txn.is_10b5_1_plan
+
+
+def is_recurring_buyer(
+    owner: ReportingOwner,
+    issuer_cik: str,
+    settings: Settings,
+    history: HistoryStore,
+) -> bool:
+    """요구사항 4-b: 로컬 이력상 같은 (issuer, owner) 조합의 반복 매수인지 판단."""
+
+    occurrences = history.count_recent_purchases(
+        owner_cik=owner.cik,
+        issuer_cik=issuer_cik,
+        lookback_days=settings.recurring_lookback_days,
+    )
+    return occurrences >= settings.recurring_min_occurrences
+
+
+def evaluate(
+    txn: Transaction,
+    owner: ReportingOwner,
+    issuer_cik: str,
+    settings: Settings,
+    history: HistoryStore,
+) -> FilterResult:
+    failed: list[str] = []
+
+    if not is_open_market_purchase(txn):
+        failed.append("공개시장 매수(P/A)가 아님")
+    if not is_within_value_range(txn, settings):
+        failed.append(
+            f"거래금액 ${txn.value_usd:,.0f}가 허용범위 "
+            f"(${settings.min_txn_value_usd:,.0f}~${settings.max_txn_value_usd:,.0f}) 밖"
+        )
+    if not is_individual(owner):
+        failed.append("법인/펀드 등으로 추정되는 신고인 이름")
+    if not is_officer_or_director(owner):
+        failed.append("Officer/Director가 아님 (10% Owner 또는 Other만 해당)")
+    if is_10b5_1_plan_trade(txn):
+        failed.append("Rule 10b5-1 사전 계획 거래")
+    if is_recurring_buyer(owner, issuer_cik, settings, history):
+        failed.append("최근 반복 매수 이력 존재")
+
+    return FilterResult(passed=not failed, reasons_failed=tuple(failed))
