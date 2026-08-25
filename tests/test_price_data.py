@@ -1,3 +1,4 @@
+import math
 from datetime import date
 
 import pytest
@@ -44,3 +45,35 @@ def test_fetch_entry_and_hold_bars_raises_when_no_bars_after_filed_at(monkeypatc
 
     with pytest.raises(price_data.PriceDataUnavailable):
         price_data.fetch_entry_and_hold_bars("ABC", date(2026, 1, 1), 30)
+
+
+class _FakeIndex:
+    def __init__(self, d: date) -> None:
+        self._d = d
+
+    def date(self) -> date:
+        return self._d
+
+
+class _FakeDF:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def iterrows(self):
+        return iter(self._rows)
+
+
+def test_rows_to_bars_skips_days_with_nan_ohlc():
+    """yfinance가 특정 거래일의 OHLC 일부를 NaN으로 돌려주는 경우가 있는데, 그대로 담으면
+    NaN이 simulate_trade의 비교(항상 False)를 조용히 통과해 return_pct가 NaN이 되고 리포트
+    집계 전체가 오염됩니다 — 그런 날은 아예 건너뛰어야 합니다."""
+
+    rows = [
+        (_FakeIndex(date(2026, 1, 5)), {"Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.5}),
+        (_FakeIndex(date(2026, 1, 6)), {"Open": 100.5, "High": math.nan, "Low": 99.5, "Close": 100.0}),
+        (_FakeIndex(date(2026, 1, 7)), {"Open": 100.0, "High": 102.0, "Low": 99.0, "Close": 101.0}),
+    ]
+
+    bars = price_data._rows_to_bars(_FakeDF(rows))
+
+    assert [b.trade_date for b in bars] == [date(2026, 1, 5), date(2026, 1, 7)]

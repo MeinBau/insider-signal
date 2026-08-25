@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -61,16 +62,32 @@ def fetch_entry_and_hold_bars(
 
 
 def _rows_to_bars(df) -> list[DailyBar]:
+    """yfinance가 가끔 특정 거래일의 OHLC 중 일부를 NaN으로 돌려줄 때가 있습니다 (일시적인
+    Yahoo 쪽 데이터 공백). 그런 날을 그대로 DailyBar에 담으면 NaN이 simulate_trade의 비교
+    연산(항상 False)을 조용히 통과해버려 그 신호의 return_pct가 NaN이 되고, 이게 리포트
+    집계(평균/기대값)를 통째로 오염시킬 수 있습니다. 그래서 NaN이 하나라도 섞인 날은 그냥
+    건너뜁니다 (주말/공휴일처럼 "그 날은 없는 셈" 취급 — 이미 그렇게 다루는 방식과 동일).
+    """
+
     bars: list[DailyBar] = []
     for idx, row in df.iterrows():
         trade_date = idx.date() if hasattr(idx, "date") else idx
+        values = (
+            float(row["Open"]),
+            float(row["High"]),
+            float(row["Low"]),
+            float(row["Close"]),
+        )
+        if any(math.isnan(v) for v in values):
+            logger.debug("NaN OHLC 값이 있는 거래일 건너뜀: %s (%s)", trade_date, values)
+            continue
         bars.append(
             DailyBar(
                 trade_date=trade_date,
-                open=float(row["Open"]),
-                high=float(row["High"]),
-                low=float(row["Low"]),
-                close=float(row["Close"]),
+                open=values[0],
+                high=values[1],
+                low=values[2],
+                close=values[3],
             )
         )
     return bars
