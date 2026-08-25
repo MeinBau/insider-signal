@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 SCHEMA = """
@@ -63,7 +63,7 @@ class HistoryStore:
         with self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO seen_filings (accession_no, processed_at) VALUES (?, ?)",
-                (accession_no, datetime.utcnow().isoformat()),
+                (accession_no, datetime.now(UTC).isoformat()),
             )
 
     # --- 반복 매수 탐지 ---
@@ -94,7 +94,7 @@ class HistoryStore:
                     price_per_share,
                     shares * price_per_share,
                     accession_no,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
 
@@ -128,7 +128,7 @@ class HistoryStore:
         """
 
         today = date.today().isoformat()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         with self._conn:
             for _ in range(synthetic_count):
                 self._conn.execute(

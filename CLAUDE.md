@@ -1,4 +1,5 @@
-# CLAUDE.md
+@HARNESS.md
+# CLAUDE.mdS
 
 이 파일은 이 저장소에서 작업하는 Claude Code(및 다른 협업자)를 위한 가이드입니다.
 
