@@ -115,10 +115,6 @@ def parse_form4_xml(xml_bytes: bytes, *, accession_no: str, source_url: str) -> 
             fn_texts = tuple(
                 footnotes[fid] for fid in _footnote_ids_for(txn_el) if fid in footnotes
             )
-            # 문서 전체 각주도 함께 보존해 10b5-1 텍스트 탐지 누락을 방지 (트랜잭션에 footnoteId가
-            # 명시적으로 안 걸려있는 구버전 스키마 대응).
-            if not fn_texts and footnotes:
-                fn_texts = tuple(footnotes.values())
 
             try:
                 shares = float(shares_s) if shares_s else 0.0

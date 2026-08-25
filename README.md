@@ -44,7 +44,7 @@ SEC_EDGAR_CONTACT="insider-signal/0.1 your-email@example.com"
 
 ```bash
 # 최신 Form 4를 한 번만 조회하고 종료 (동작 확인용)
-python -m insider_signal.cli run --once -v
+python -m insider_signal.cli -v run --once
 
 # 계속 polling (기본 5분 주기, .env의 POLL_INTERVAL_SECONDS로 조절)
 python -m insider_signal.cli run
