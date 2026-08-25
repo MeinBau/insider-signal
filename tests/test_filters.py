@@ -106,3 +106,31 @@ def test_first_time_buyer_is_not_flagged_as_recurring(settings, history):
     result = filters.evaluate(txn, filing.owner, filing.issuer.cik, settings, history)
 
     assert result.passed is True
+
+
+def test_evaluate_as_of_uses_historical_reference_date_for_recurring_check(settings, history):
+    """백테스트가 과거 filing의 날짜를 as_of로 넘기면, 그 시점 기준으로 반복매수를 판정해야
+    합니다 (오늘 기준으로 판정하면 과거 데이터에 대해 틀린 결과가 나오는 버그의 회귀 테스트)."""
+
+    filing = _load("sample_form4_cfo_purchase.xml")
+    txn = filing.transactions[0]
+
+    reference = date(2020, 1, 1)
+    for i in range(settings.recurring_min_occurrences):
+        history.record_purchase(
+            owner_cik=filing.owner.cik,
+            issuer_cik=filing.issuer.cik,
+            transaction_date=reference - timedelta(days=30 * (i + 1)),
+            shares=1000,
+            price_per_share=80,
+            accession_no=f"seed-{i}",
+        )
+
+    # as_of 없이(오늘 기준)는 2020년 이력이 lookback 밖이라 통과해야 함.
+    assert filters.evaluate(txn, filing.owner, filing.issuer.cik, settings, history).passed is True
+    # as_of를 그 시점으로 주면 반복매수로 판정되어 탈락해야 함.
+    result = filters.evaluate(
+        txn, filing.owner, filing.issuer.cik, settings, history, as_of=reference
+    )
+    assert result.passed is False
+    assert any("반복" in r for r in result.reasons_failed)

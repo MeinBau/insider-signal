@@ -79,7 +79,7 @@ class Settings:
     )
 
     recurring_lookback_days: int = field(
-        default_factory=lambda: _int_env("RECURRING_LOOKBACK_DAYS", 180)
+        default_factory=lambda: _int_env("RECURRING_LOOKBACK_DAYS", 90)
     )
     recurring_min_occurrences: int = field(
         default_factory=lambda: _int_env("RECURRING_MIN_OCCURRENCES", 3)

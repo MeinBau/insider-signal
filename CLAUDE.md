@@ -31,7 +31,7 @@
 4. **반복 매수 배제**: 어떤 이유가 있어서 사는 게 아니라 정기적/자동으로 사는 거래(신호로서 가치가 낮음)는 제외.
    - **Rule 10b5-1 플랜 거래**: 각주(footnote)에 `10b5-1` 문구가 포함되면 무조건 제외 (가장 신뢰도 높은 신호).
    - **로컬 이력 기반 반복 매수 탐지**: `history.py`가 SQLite(`data/insider_signal.db`)에 모든 매수 이력을
-     (issuer_cik, owner_cik) 단위로 누적 저장하고, 최근 `RECURRING_LOOKBACK_DAYS`(기본 180일) 동안
+     (issuer_cik, owner_cik) 단위로 누적 저장하고, 최근 `RECURRING_LOOKBACK_DAYS`(기본 90일) 동안
      `RECURRING_MIN_OCCURRENCES`(기본 3회) 이상 같은 조합의 매수가 있으면 "반복 매수자"로 간주해 제외.
    - 이 로컬 이력은 프로그램을 처음 돌리는 시점에는 비어 있으므로, 첫 실행 시 EDGAR
      submissions API(`edgar_client.get_owner_recent_form4_count`)로 해당 신고인의 최근 Form 4 제출 빈도를

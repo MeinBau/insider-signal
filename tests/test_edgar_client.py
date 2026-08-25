@@ -6,7 +6,14 @@
 2. 신고인이 여러 명인 Form 4는 issuer/owner 각각 별도 entry로, 같은 accession 번호가 중복됨.
 """
 
-from insider_signal.edgar_client import SECEdgarClient, _parse_index_href
+from datetime import date
+
+from insider_signal.edgar_client import (
+    SECEdgarClient,
+    _parse_index_href,
+    _parse_master_index,
+    _quarters_between,
+)
 
 SAMPLE_ATOM_FEED = b"""<?xml version="1.0" encoding="ISO-8859-1" ?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -69,3 +76,42 @@ def test_get_latest_form4_entries_filters_non_form4_and_dedups(monkeypatch):
     assert entries[0].accession_no == "0001193125-26-361711"
     # 피드에 먼저 등장한 entry(신고인 Wu Yongming, cik=2121606)가 채택됨.
     assert entries[0].cik == "2121606"
+
+
+SAMPLE_MASTER_IDX = """\
+Description:           Master Index of EDGAR Dissemination Feed
+Last Data Received:    2026-06-10
+--------------------------------------------------------------------------------
+CIK|Company Name|Form Type|Date Filed|Filename
+1000209|MEDALLION FINANCIAL CORP|4|2026-06-10|edgar/data/1000209/0001193125-26-265799.txt
+2121606|WU YONGMING|4/A|2026-06-11|edgar/data/2121606/0001193125-26-265800.txt
+320193|APPLE INC|424B3|2026-06-11|edgar/data/320193/0001193125-26-265801.txt
+"""
+
+
+def test_parse_master_index_filters_form4_exact_match():
+    refs = list(_parse_master_index(SAMPLE_MASTER_IDX))
+
+    assert len(refs) == 1
+    assert refs[0].cik == "1000209"
+    assert refs[0].form_type == "4"
+    assert refs[0].filed_at == date(2026, 6, 10)
+    assert refs[0].accession_no == "0001193125-26-265799"
+
+
+def test_parse_master_index_includes_amendments_when_requested():
+    refs = list(_parse_master_index(SAMPLE_MASTER_IDX, include_amendments=True))
+
+    assert {r.form_type for r in refs} == {"4", "4/A"}
+
+
+def test_quarters_between_spans_multiple_quarters():
+    assert _quarters_between(date(2026, 5, 25), date(2026, 8, 25)) == [(2026, 2), (2026, 3)]
+
+
+def test_quarters_between_single_quarter():
+    assert _quarters_between(date(2026, 6, 1), date(2026, 6, 30)) == [(2026, 2)]
+
+
+def test_quarters_between_spans_year_boundary():
+    assert _quarters_between(date(2025, 11, 1), date(2026, 1, 15)) == [(2025, 4), (2026, 1)]

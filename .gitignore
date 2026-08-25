@@ -7,6 +7,8 @@ env/
 data/*.db
 data/*.db-journal
 !data/.gitkeep
+data/backtest_runs/*
+!data/backtest_runs/.gitkeep
 .pytest_cache/
 *.egg-info/
 .DS_Store
