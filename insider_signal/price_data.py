@@ -40,9 +40,18 @@ def fetch_entry_and_hold_bars(
     """
 
     window_end = filed_at + timedelta(days=int(max_hold_days * 1.6) + calendar_buffer_days)
-    df = yf.Ticker(ticker).history(
-        start=filed_at.isoformat(), end=window_end.isoformat(), interval="1d"
-    )
+    try:
+        df = yf.Ticker(ticker).history(
+            start=filed_at.isoformat(), end=window_end.isoformat(), interval="1d"
+        )
+    except Exception as exc:
+        # yfinance는 잘못된 티커/상장폐지/Yahoo 쪽 일시적 오류(429, 502 등) 시 다양한 예외
+        # (YFException, JSON 파싱 오류, 네트워크 예외...)를 던집니다. 신호 하나의 가격 조회
+        # 실패로 몇 시간 걸리는 백테스트 전체가 죽으면 안 되므로, 전부 PriceDataUnavailable로
+        # 통일해서 상위(run_price_simulations)가 exit_reason="no_price_data"로 기록하고
+        # 넘어갈 수 있게 합니다.
+        raise PriceDataUnavailable(f"{ticker}: 가격 조회 실패 ({exc})") from exc
+
     bars = [bar for bar in _rows_to_bars(df) if bar.trade_date > filed_at]
     if not bars:
         raise PriceDataUnavailable(f"{ticker}: {filed_at.isoformat()} 이후 거래일 데이터 없음")

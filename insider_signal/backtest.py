@@ -452,6 +452,16 @@ def _process_one_filing(
 
 # --- 2단계: 필터 통과 신호에 대한 가격 시뮬레이션 ---
 
+_MISSING_TICKER_PLACEHOLDERS = {"N/A", "NA", "NONE", "-", "N.A."}
+
+
+def _is_missing_ticker(ticker: str) -> bool:
+    """빈 문자열뿐 아니라, 일부 Form 4가 issuerTradingSymbol에 실제로 채워 넣는
+    "N/A" 같은 플레이스홀더도 티커 없음으로 취급합니다 (yfinance에 그대로 넘기면 예외가 남).
+    """
+
+    return not ticker or ticker.strip().upper() in _MISSING_TICKER_PLACEHOLDERS
+
 
 def run_price_simulations(
     *,
@@ -460,12 +470,16 @@ def run_price_simulations(
     stop_pct: float,
     max_hold_days: int,
     fetch_bars=price_data_module.fetch_entry_and_hold_bars,
+    progress_every: int = 50,
 ) -> None:
     pending = store.iter_signals_needing_simulation(target_pct, stop_pct, max_hold_days)
     logger.info("가격 시뮬레이션 대상 %d건", len(pending))
 
-    for signal in pending:
-        if not signal.issuer_ticker:
+    for i, signal in enumerate(pending, start=1):
+        if i % progress_every == 0:
+            logger.info("가격 시뮬레이션 진행 %d/%d", i, len(pending))
+
+        if _is_missing_ticker(signal.issuer_ticker):
             store.upsert_simulation(
                 signal_id=signal.id,
                 target_pct=target_pct,
@@ -679,7 +693,11 @@ def run_backtest(
             progress_every=progress_every,
         )
         run_price_simulations(
-            store=store, target_pct=target_pct, stop_pct=stop_pct, max_hold_days=max_hold_days
+            store=store,
+            target_pct=target_pct,
+            stop_pct=stop_pct,
+            max_hold_days=max_hold_days,
+            progress_every=progress_every,
         )
         report = build_report(
             store, start=start, end=end, target_pct=target_pct, stop_pct=stop_pct, max_hold_days=max_hold_days

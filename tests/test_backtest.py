@@ -281,3 +281,60 @@ def test_backtest_store_iter_signals_needing_simulation_excludes_failed_and_alre
     assert store.iter_signals_needing_simulation(3.0, 4.0, 30) == []
     # 다른 파라미터 조합으로는 여전히 시뮬레이션이 필요함 (신호 재사용, EDGAR 재조회 없음).
     assert len(store.iter_signals_needing_simulation(5.0, 4.0, 30)) == 1
+
+
+# --- 티커 플레이스홀더("N/A" 등) 처리 ---
+
+
+@pytest.mark.parametrize(
+    "ticker, expected",
+    [
+        ("", True),
+        ("N/A", True),
+        ("n/a", True),
+        (" NA ", True),
+        ("-", True),
+        ("AAPL", False),
+    ],
+)
+def test_is_missing_ticker(ticker, expected):
+    assert backtest._is_missing_ticker(ticker) is expected
+
+
+def test_run_price_simulations_treats_na_ticker_as_no_ticker_without_fetching(store):
+    """issuerTradingSymbol이 "N/A"로 채워진 filing도 빈 문자열과 동일하게 no_ticker로
+    처리되어야 하고, yfinance 조회 자체를 시도하면 안 됩니다 (실제로 이 값이 yfinance에
+    그대로 넘어가서 예외로 전체 백테스트가 죽은 적이 있음)."""
+
+    store.upsert_signal(
+        accession_no="acc-na",
+        txn_index=0,
+        issuer_cik="1",
+        issuer_ticker="N/A",
+        issuer_name="Some Corp",
+        owner_cik="2",
+        owner_name="Jane Doe",
+        officer_title="CEO",
+        transaction_date=date(2026, 1, 5),
+        filed_at=date(2026, 1, 7),
+        shares=1000,
+        price_per_share=100,
+        value_usd=100_000,
+        passed_filters=True,
+        reasons_failed=(),
+    )
+
+    calls = []
+
+    def fake_fetch(ticker, filed_at, max_hold_days):
+        calls.append(ticker)
+        raise AssertionError("N/A 티커는 fetch_bars를 호출하면 안 됨")
+
+    backtest.run_price_simulations(
+        store=store, target_pct=3.0, stop_pct=4.0, max_hold_days=30, fetch_bars=fake_fetch
+    )
+
+    results = store.iter_results(3.0, 4.0, 30)
+    assert len(results) == 1
+    assert results[0].exit_reason == "no_ticker"
+    assert calls == []
