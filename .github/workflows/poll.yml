@@ -2,9 +2,7 @@ name: Insider Signal Poll
 
 on:
   schedule:
-    # UTC 기준. 09:00 UTC = 18:00 KST, 22:00 UTC = 07:00 KST (필요시 시각 조정하세요)
-    - cron: "0 09 * * *"
-    - cron: "0 22 * * *"
+    - cron: "0 * * * *"  # 매시 정각 (UTC 기준)
   workflow_dispatch: {}
 
 concurrency:
