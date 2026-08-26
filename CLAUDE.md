@@ -92,9 +92,14 @@ filing index JSON에서 실제 XML 문서 URL 탐색 → XML 파싱 → 트랜�
 - **진입가/시점**: `master.idx`에서 얻은 `HistoricalFilingRef.filed_at`(EDGAR 실제 제출일) 다음
   거래일 시가. 파싱된 `Filing.filed_at`(XML `periodOfReport`, 실질적으로 거래일과 거의 같은 값)은
   진입가 계산에 쓰면 안 됩니다 — 그대로 쓰면 look-ahead bias가 재발합니다.
-- **청산 규칙**: +target_pct%/-stop_pct% 중 일봉 고가/저가로 먼저 닿는 쪽 (기본 +3%/-4%). 같은 봉에서
+- **청산 규칙**: +target_pct%/-stop_pct% 중 일봉 고가/저가로 먼저 닿는 쪽 (기본 +5%/-10%). 같은 봉에서
   둘 다 닿으면 보수적으로 손절 우선. 최대 보유 기간(기본 30거래일) 안에 안 닿으면 그날 종가로
   "timeout" 종료.
+  - 기본값 +5%/-10%는 처음엔 +3%/-4%였다가, 서로 겹치지 않는 세 달(2026년 5·6·7~8월)로
+    아웃오브샘플 검증한 결과 손절을 넓게(8~10%) 잡을수록 세 기간 모두에서 기대값이 뚜렷하게
+    개선되어 사용자가 명시적으로 변경을 확정한 값입니다. 다만 절대 수익률 자체는 달마다 편차가
+    커서(+0.35%~+2.40%), "이 값이 항상 이만큼 번다"는 보장이 아니라 "3%/4%보다 낫다"는 상대적
+    확신 수준입니다.
 - **반복매수 판정의 as_of**: 라이브 poller는 `date.today()` 기준으로 반복매수를 판정하지만, 백테스트는
   각 filing의 실제 제출일을 `as_of`로 넘겨 그 시점 기준으로 판정합니다 (`filters.evaluate(...,
   as_of=...)` → `history.count_recent_purchases(..., as_of=...)`). `as_of`를 생략하면 기존과 동일하게
@@ -104,7 +109,7 @@ filing index JSON에서 실제 XML 문서 URL 탐색 → XML 파싱 → 트랜�
 - **DB 분리**: 라이브 이력 DB(`data/insider_signal.db`)는 백테스트가 절대 건드리지 않습니다. 대신
   `data/backtest_runs/{기간}_history.sqlite3`(재개용 dedup/반복매수 이력)와
   `data/backtest_runs/{기간}_results.sqlite3`(신호+시뮬레이션 결과, CSV로도 export)를 따로 씁니다.
-- 실행: `python -m insider_signal.cli backtest --target-pct 3 --stop-pct 4` (기본 최근 1개월,
+- 실행: `python -m insider_signal.cli backtest --target-pct 5 --stop-pct 10` (기본 최근 1개월,
   `--start`/`--end`로 조정). 시장 전체 스캔은 느리므로(하루 1,000~1,500건, 레이트리밋 때문에 filing당
   약 0.4초) 기간을 넓게 잡을수록 오래 걸립니다 — 중단 후 같은 명령으로 재실행하면 이미 처리한
   filing은 건너뛰고 이어서 진행합니다.
@@ -144,6 +149,6 @@ filing index JSON에서 실제 XML 문서 URL 탐색 → XML 파싱 → 트랜�
 
 - 실제 주문 실행/브로커 API 연동 코드를 이 저장소에 조용히 추가하지 말 것 (사용자가 명시적으로 요청할 때만).
 - 필터 임계값(10만~50만 달러, Officer/Director 전용 등)을 사용자 확인 없이 임의로 변경하지 말 것.
-- 백테스트의 목표수익률/손절률 기본값(+3%/-4%), 최대 보유 기간(30거래일), 진입가 규칙(공시일 다음
+- 백테스트의 목표수익률/손절률 기본값(+5%/-10%), 최대 보유 기간(30거래일), 진입가 규칙(공시일 다음
   거래일 시가)도 사용자가 명시적으로 확정한 값이므로 확인 없이 바꾸지 말 것.
 - `.env` 파일이나 실제 알림 webhook URL, SEC 연락처 이메일을 커밋하지 말 것 (`.gitignore`에 이미 포함).

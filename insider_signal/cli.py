@@ -3,7 +3,7 @@
 사용법:
     python -m insider_signal.cli run --once
     python -m insider_signal.cli run --interval 300
-    python -m insider_signal.cli backtest --target-pct 3 --stop-pct 4
+    python -m insider_signal.cli backtest --target-pct 5 --stop-pct 10
 """
 
 from __future__ import annotations
@@ -67,8 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     bt_p.add_argument("--start", type=_parse_date_arg, default=None, help="시작일 YYYY-MM-DD (기본: 종료일 1개월 전)")
     bt_p.add_argument("--end", type=_parse_date_arg, default=None, help="종료일 YYYY-MM-DD (기본: 오늘)")
-    bt_p.add_argument("--target-pct", type=float, default=3.0, help="목표수익률 %% (기본 3.0)")
-    bt_p.add_argument("--stop-pct", type=float, default=4.0, help="손절률 %% (기본 4.0)")
+    bt_p.add_argument("--target-pct", type=float, default=5.0, help="목표수익률 %% (기본 5.0)")
+    bt_p.add_argument("--stop-pct", type=float, default=10.0, help="손절률 %% (기본 10.0)")
     bt_p.add_argument("--max-hold-days", type=int, default=30, help="최대 보유 거래일수 (기본 30)")
     bt_p.add_argument(
         "--include-amendments", action="store_true", help="Form 4/A(정정신고)도 포함"
