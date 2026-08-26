@@ -244,6 +244,24 @@ class SECEdgarClient:
                 count += 1
         return count
 
+    def get_issuer_sic(self, issuer_cik: str) -> str | None:
+        """이슈어의 SIC 코드를 조회합니다 (백테스트 섹터 분류 실험용, ``sectors.py`` 참고).
+
+        owner용 반복매수 조회와 같은 submissions 엔드포인트지만, ``filings.recent``가 아니라
+        최상위 ``sic`` 필드를 읽습니다.
+        """
+
+        cik10 = issuer_cik.zfill(10)
+        url = SUBMISSIONS_URL.format(cik10=cik10)
+        try:
+            resp = self._get(url)
+        except requests.HTTPError as exc:
+            logger.info("submissions API 조회 실패(issuer_cik=%s): %s", issuer_cik, exc)
+            return None
+        data = resp.json()
+        sic = data.get("sic")
+        return sic or None
+
     def iter_historical_form4_filings(
         self, start: date, end: date, *, include_amendments: bool = False
     ) -> Iterator[HistoricalFilingRef]:

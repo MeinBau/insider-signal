@@ -74,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         "--include-amendments", action="store_true", help="Form 4/A(정정신고)도 포함"
     )
     bt_p.add_argument(
+        "--sector-experiment", action="store_true",
+        help="바이오/금 이슈어(SIC 코드 기반)에 sectors.SECTOR_TARGET_STOP의 target/stop을 적용 "
+        "(미검증 가설치, 기본값은 그대로 --target-pct/--stop-pct 사용)",
+    )
+    bt_p.add_argument(
         "--checkpoint-dir", type=Path, default=None,
         help="재개용 체크포인트/결과 DB 및 CSV 리포트를 저장할 디렉터리 (기본: data/backtest_runs/)",
     )
@@ -96,11 +101,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "backtest":
         from .backtest import print_summary, run_backtest  # yfinance는 backtest에서만 필요하므로 지연 import
+        from .sectors import SECTOR_TARGET_STOP
 
         end = args.end or date.today()
         start = args.start or _months_ago(end, 1)
         checkpoint_dir = args.checkpoint_dir or (REPO_ROOT / "data" / "backtest_runs")
         run_tag = f"{start.isoformat()}_{end.isoformat()}"
+        if args.sector_experiment:
+            run_tag += "_sector"
 
         report = run_backtest(
             client=client,
@@ -115,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
             output_csv_path=checkpoint_dir / f"{run_tag}_results.csv",
             include_amendments=args.include_amendments,
             progress_every=args.progress_every,
+            sector_overrides=SECTOR_TARGET_STOP if args.sector_experiment else None,
         )
         print_summary(report)
         return 0
