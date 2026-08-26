@@ -81,11 +81,15 @@ def test_simulate_trade_raises_on_empty_bars():
 
 
 class _FakeClient:
-    def __init__(self, xml_bytes: bytes, refs: list[HistoricalFilingRef]) -> None:
+    def __init__(
+        self, xml_bytes: bytes, refs: list[HistoricalFilingRef], sic_by_cik: dict[str, str] | None = None
+    ) -> None:
         self._xml_bytes = xml_bytes
         self._refs = refs
+        self._sic_by_cik = sic_by_cik or {}
         self.get_primary_xml_url_calls = 0
         self.fetch_xml_calls = 0
+        self.get_issuer_sic_calls = 0
 
     def get_primary_xml_url(self, cik: str, accession_no: str) -> str:
         self.get_primary_xml_url_calls += 1
@@ -94,6 +98,10 @@ class _FakeClient:
     def fetch_xml(self, url: str) -> bytes:
         self.fetch_xml_calls += 1
         return self._xml_bytes
+
+    def get_issuer_sic(self, issuer_cik: str) -> str | None:
+        self.get_issuer_sic_calls += 1
+        return self._sic_by_cik.get(issuer_cik)
 
     def iter_historical_form4_filings(self, start, end, *, include_amendments: bool = False):
         return list(self._refs)
@@ -149,6 +157,79 @@ def test_process_one_filing_writes_passing_signal_and_records_purchase(
     assert history.is_seen(cfo_purchase_ref.accession_no) is True
     assert store.count_signals() == 1
     assert store.count_signals(passed_only=True) == 1
+
+
+def test_process_one_filing_classifies_sector_when_enabled(settings, history, store, cfo_purchase_ref):
+    """sample_form4_cfo_purchase.xml의 issuerCik는 0001111111. classify_sector=True이고 이 CIK의
+    SIC가 바이오 코드(2836)면 통과한 신호에 sector="bio"가 저장돼야 합니다."""
+
+    xml_bytes = (FIXTURES / "sample_form4_cfo_purchase.xml").read_bytes()
+    client = _FakeClient(xml_bytes, refs=[cfo_purchase_ref], sic_by_cik={"0001111111": "2836"})
+
+    backtest._process_one_filing(
+        cfo_purchase_ref,
+        client=client,
+        history=history,
+        store=store,
+        settings=settings,
+        classify_sector=True,
+        issuer_sector_cache={},
+    )
+
+    [signal] = store.iter_passed_signals()
+    assert signal.sector == "bio"
+    assert client.get_issuer_sic_calls == 1
+
+
+def test_process_one_filing_does_not_look_up_sic_when_sector_classification_disabled(
+    settings, history, store, cfo_purchase_ref
+):
+    xml_bytes = (FIXTURES / "sample_form4_cfo_purchase.xml").read_bytes()
+    client = _FakeClient(xml_bytes, refs=[cfo_purchase_ref], sic_by_cik={"0001111111": "2836"})
+
+    backtest._process_one_filing(
+        cfo_purchase_ref, client=client, history=history, store=store, settings=settings
+    )
+
+    [signal] = store.iter_passed_signals()
+    assert signal.sector == ""
+    assert client.get_issuer_sic_calls == 0
+
+
+def test_run_price_simulations_applies_sector_specific_target_stop(store):
+    """섹터별 target/stop 실험 경로: bio 신호는 SECTOR_TARGET_STOP["bio"]로, sector 없는
+    신호는 기본 target_pct/stop_pct로 시뮬레이션되어야 합니다."""
+
+    bio_id = store.upsert_signal(
+        accession_no="acc-bio", txn_index=0, issuer_cik="1", issuer_ticker="BIOX",
+        issuer_name="Bio X Inc", owner_cik="2", owner_name="Jane Doe", officer_title="CEO",
+        transaction_date=date(2026, 1, 5), filed_at=date(2026, 1, 7),
+        shares=1000, price_per_share=100, value_usd=100_000,
+        passed_filters=True, reasons_failed=(), sector="bio",
+    )
+    default_id = store.upsert_signal(
+        accession_no="acc-default", txn_index=0, issuer_cik="3", issuer_ticker="ABC",
+        issuer_name="ABC Inc", owner_cik="4", owner_name="John Doe", officer_title="Director",
+        transaction_date=date(2026, 1, 5), filed_at=date(2026, 1, 7),
+        shares=1000, price_per_share=100, value_usd=100_000,
+        passed_filters=True, reasons_failed=(), sector="",
+    )
+
+    def fake_fetch(ticker, filed_at, max_hold_days):
+        bar = _bar(8, open=101, high=101, low=101, close=101)
+        return bar, [bar]
+
+    from insider_signal.sectors import SECTOR_TARGET_STOP
+
+    backtest.run_price_simulations(
+        store=store, target_pct=5.0, stop_pct=10.0, max_hold_days=30,
+        sector_overrides=SECTOR_TARGET_STOP, fetch_bars=fake_fetch,
+    )
+
+    bio_target, bio_stop = SECTOR_TARGET_STOP["bio"]
+    assert store.has_simulation(bio_id, bio_target, bio_stop, 30)
+    assert not store.has_simulation(bio_id, 5.0, 10.0, 30)
+    assert store.has_simulation(default_id, 5.0, 10.0, 30)
 
 
 def test_enumerate_and_filter_skips_already_seen_filings_on_resume(
