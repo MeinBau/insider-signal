@@ -20,7 +20,9 @@ rows = []
 for i, ticker in enumerate(tickers, start=1):
     market_cap = None
     try:
-        market_cap = yf.Ticker(ticker).fast_info.get("market_cap")
+        # FastInfo.get()은 camelCase 키("marketCap")만 인식해서 snake_case로 조회하면
+        # 조용히 None을 반환한다 (실제로 겪은 버그) -- 속성 접근을 직접 써야 함.
+        market_cap = yf.Ticker(ticker).fast_info.market_cap
     except Exception as exc:
         print(f"[{i}/{len(tickers)}] {ticker}: 조회 실패 ({exc})")
     rows.append((ticker, market_cap))
