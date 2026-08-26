@@ -457,6 +457,12 @@ def enumerate_and_filter(
             )
 
 
+def _resolve_sector(client: SECEdgarClient, cache: dict[str, str | None], issuer_cik: str) -> str:
+    if issuer_cik not in cache:
+        cache[issuer_cik] = client.get_issuer_sic(issuer_cik)
+    return sectors.classify_sic(cache[issuer_cik]) or ""
+
+
 def _process_one_filing(
     ref: HistoricalFilingRef,
     *,
@@ -493,18 +499,28 @@ def _process_one_filing(
         if not txn.is_open_market_purchase:
             continue
 
+        sector = ""
+        min_value_override = None
+        if classify_sector:
+            cache = issuer_sector_cache if issuer_sector_cache is not None else {}
+            # 완화된 바이오 하한($50,000~$100,000) 구간에 걸리는 거래는, value-range 판정
+            # 자체가 섹터에 좌우되므로 filters.evaluate() 호출 전에 미리 섹터를 알아야 함.
+            if sectors.BIO_MIN_TXN_VALUE_USD <= txn.value_usd < settings.min_txn_value_usd:
+                sector = _resolve_sector(client, cache, filing.issuer.cik)
+                if sector == "bio":
+                    min_value_override = sectors.BIO_MIN_TXN_VALUE_USD
+
         # ref.filed_at(EDGAR 실제 제출일)을 as_of로 사용합니다 — filing.filed_at(XML의
         # periodOfReport)은 거래일과 거의 같은 값이라 그대로 쓰면 look-ahead bias가 재발합니다.
         result = filters.evaluate(
-            txn, filing.owner, filing.issuer.cik, settings, history, as_of=ref.filed_at
+            txn, filing.owner, filing.issuer.cik, settings, history,
+            as_of=ref.filed_at, min_value_override=min_value_override,
         )
 
-        sector = ""
-        if classify_sector and result.passed:
+        if classify_sector and result.passed and not sector:
+            # 정상 범위($10만 이상)로 통과한 경우엔 위에서 섹터를 안 구했을 수 있으니 여기서 구함.
             cache = issuer_sector_cache if issuer_sector_cache is not None else {}
-            if filing.issuer.cik not in cache:
-                cache[filing.issuer.cik] = client.get_issuer_sic(filing.issuer.cik)
-            sector = sectors.classify_sic(cache[filing.issuer.cik]) or ""
+            sector = _resolve_sector(client, cache, filing.issuer.cik)
 
         store.upsert_signal(
             accession_no=ref.accession_no,

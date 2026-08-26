@@ -78,6 +78,22 @@ def test_out_of_range_value_is_rejected(settings, history):
     assert any("거래금액" in r for r in result.reasons_failed)
 
 
+def test_min_value_override_widens_lower_bound(settings, history):
+    """sectors.BIO_MIN_TXN_VALUE_USD 같은 완화된 하한을 명시적으로 넘기면 그 값으로
+    판정해야 합니다 (--sector-experiment의 바이오 하한 완화 전용 경로)."""
+
+    filing = _load("sample_form4_ceo_midvalue.xml")  # $70,000, 기본 하한 밖
+    txn = filing.transactions[0]
+
+    default_result = filters.evaluate(txn, filing.owner, filing.issuer.cik, settings, history)
+    assert default_result.passed is False
+
+    widened_result = filters.evaluate(
+        txn, filing.owner, filing.issuer.cik, settings, history, min_value_override=50_000.0
+    )
+    assert widened_result.passed is True
+
+
 def test_recurring_buyer_is_rejected(settings, history):
     filing = _load("sample_form4_cfo_purchase.xml")
     txn = filing.transactions[0]

@@ -196,6 +196,50 @@ def test_process_one_filing_does_not_look_up_sic_when_sector_classification_disa
     assert client.get_issuer_sic_calls == 0
 
 
+@pytest.fixture()
+def midvalue_ref() -> HistoricalFilingRef:
+    return HistoricalFilingRef(
+        cik="0000000001",
+        company_name="Example Biotech Inc",
+        form_type="4",
+        filed_at=date(2026, 1, 10),
+        accession_no="0000000000-26-000002",
+    )
+
+
+def test_process_one_filing_widens_value_floor_for_bio_issuer(
+    settings, history, store, midvalue_ref
+):
+    """$70,000 거래(기본 하한 $100,000 밖)는 이슈어가 바이오(SIC 2836 등)로 분류될 때만
+    완화된 하한($50,000)이 적용되어 통과해야 합니다."""
+
+    xml_bytes = (FIXTURES / "sample_form4_ceo_midvalue.xml").read_bytes()
+    client = _FakeClient(xml_bytes, refs=[midvalue_ref], sic_by_cik={"0001111111": "2836"})
+
+    backtest._process_one_filing(
+        midvalue_ref, client=client, history=history, store=store, settings=settings,
+        classify_sector=True, issuer_sector_cache={},
+    )
+
+    [signal] = store.iter_passed_signals()
+    assert signal.sector == "bio"
+
+
+def test_process_one_filing_does_not_widen_value_floor_for_non_bio_issuer(
+    settings, history, store, midvalue_ref
+):
+    xml_bytes = (FIXTURES / "sample_form4_ceo_midvalue.xml").read_bytes()
+    client = _FakeClient(xml_bytes, refs=[midvalue_ref], sic_by_cik={"0001111111": "7372"})
+
+    backtest._process_one_filing(
+        midvalue_ref, client=client, history=history, store=store, settings=settings,
+        classify_sector=True, issuer_sector_cache={},
+    )
+
+    assert store.count_signals(passed_only=True) == 0
+    assert store.count_signals() == 1
+
+
 def test_run_price_simulations_applies_sector_specific_target_stop(store):
     """섹터별 target/stop 실험 경로: bio 신호는 SECTOR_TARGET_STOP["bio"]로, sector 없는
     신호는 기본 target_pct/stop_pct로 시뮬레이션되어야 합니다."""
