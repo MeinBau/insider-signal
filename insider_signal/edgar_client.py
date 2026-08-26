@@ -9,8 +9,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import PurePosixPath
 from xml.etree import ElementTree
 
 import requests
@@ -24,6 +26,7 @@ LATEST_FORM4_FEED_URL = (
     "?action=getcurrent&type=4&company=&dateb=&owner=include&count={count}&output=atom"
 )
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik10}.json"
+FULL_INDEX_MASTER_URL = "https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/master.idx"
 
 MIN_REQUEST_INTERVAL_SEC = 0.2  # 초당 최대 5회 수준으로 보수적으로 제한 (SEC 권장치보다 낮음)
 
@@ -35,6 +38,22 @@ class FeedEntry:
     index_url: str
     title: str
     updated: str
+
+
+@dataclass(frozen=True)
+class HistoricalFilingRef:
+    """분기별 벌크 인덱스(master.idx)에서 찾은 과거 Form 4 filing 한 건.
+
+    백테스트 전용. ``cik``는 master.idx 기준 발행사(issuer) CIK이며, ``filed_at``은
+    EDGAR가 실제로 접수한 날짜(``Date Filed``)입니다 — 파싱된 Filing.filed_at
+    (XML의 periodOfReport, 실질적으로 거래일과 거의 같음)과는 다른 값이므로 혼동하면 안 됩니다.
+    """
+
+    cik: str
+    company_name: str
+    form_type: str
+    filed_at: date
+    accession_no: str
 
 
 class _RateLimiter:
@@ -67,6 +86,7 @@ class SECEdgarClient:
             }
         )
         self._limiter = _RateLimiter(min_request_interval)
+        self._master_idx_cache: dict[tuple[int, int], str] = {}
 
     def _get(self, url: str, *, retries: int = 3) -> requests.Response:
         """네트워크 오류/429/5xx는 재시도하고, 그 외 4xx(404 등)는 영구적 오류로 보고 즉시 raise합니다."""
@@ -223,6 +243,78 @@ class SECEdgarClient:
             if filing_date >= cutoff:
                 count += 1
         return count
+
+    def iter_historical_form4_filings(
+        self, start: date, end: date, *, include_amendments: bool = False
+    ) -> Iterator[HistoricalFilingRef]:
+        """백테스트 전용: [start, end] 구간에 걸린 분기들의 master.idx를 받아 Form 4 filing을
+        열거합니다. ``get_latest_form4_entries``(최신 N건만 지원)로는 할 수 없는, 특정 과거
+        기간에 대한 조회입니다.
+        """
+
+        for year, quarter in _quarters_between(start, end):
+            text = self._fetch_master_index(year, quarter)
+            for ref in _parse_master_index(text, include_amendments=include_amendments):
+                if start <= ref.filed_at <= end:
+                    yield ref
+
+    def _fetch_master_index(self, year: int, quarter: int) -> str:
+        key = (year, quarter)
+        if key not in self._master_idx_cache:
+            url = FULL_INDEX_MASTER_URL.format(year=year, quarter=quarter)
+            resp = self._get(url)
+            # SEC의 idx 파일은 UTF-8이 아니라 latin-1로 인코딩되어 있음 (실제 응답으로 확인함).
+            self._master_idx_cache[key] = resp.content.decode("latin-1")
+        return self._master_idx_cache[key]
+
+
+def _quarters_between(start: date, end: date) -> list[tuple[int, int]]:
+    """start~end 구간이 걸치는 모든 (year, quarter)를 순서대로 반환합니다.
+
+    예: 2026-05-25 ~ 2026-08-25 -> [(2026, 2), (2026, 3)]
+    """
+
+    quarters: list[tuple[int, int]] = []
+    year, quarter = start.year, (start.month - 1) // 3 + 1
+    end_year, end_quarter = end.year, (end.month - 1) // 3 + 1
+    while (year, quarter) <= (end_year, end_quarter):
+        quarters.append((year, quarter))
+        quarter += 1
+        if quarter > 4:
+            quarter = 1
+            year += 1
+    return quarters
+
+
+def _parse_master_index(
+    text: str, *, include_amendments: bool = False
+) -> Iterator[HistoricalFilingRef]:
+    """master.idx는 ``CIK|Company Name|Form Type|Date Filed|Filename`` 파이프 구분 텍스트이며,
+    본문 앞에 안내용 헤더/구분선이 몇 줄 붙어있습니다 (파이프가 4개가 아닌 줄은 그냥 건너뜁니다).
+    ``Filename`` 컬럼은 이미 대시 포함 accession number를 담고 있어(``.../{accession}.txt``)
+    별도 변환 없이 ``Path(filename).stem``으로 바로 추출됩니다.
+    """
+
+    wanted = {"4", "4/A"} if include_amendments else {"4"}
+    for line in text.splitlines():
+        parts = line.split("|")
+        if len(parts) != 5:
+            continue
+        cik, company_name, form_type, date_filed_s, filename = (p.strip() for p in parts)
+        if form_type not in wanted:
+            continue
+        try:
+            filed_at = datetime.strptime(date_filed_s, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        accession_no = PurePosixPath(filename).stem
+        yield HistoricalFilingRef(
+            cik=cik,
+            company_name=company_name,
+            form_type=form_type,
+            filed_at=filed_at,
+            accession_no=accession_no,
+        )
 
 
 def _parse_index_href(href: str) -> tuple[str, str] | None:

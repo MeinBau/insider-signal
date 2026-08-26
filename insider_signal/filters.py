@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from .config import ENTITY_NAME_HINTS, Settings
 from .history import HistoryStore
@@ -61,13 +62,20 @@ def is_recurring_buyer(
     issuer_cik: str,
     settings: Settings,
     history: HistoryStore,
+    *,
+    as_of: date | None = None,
 ) -> bool:
-    """요구사항 4-b: 로컬 이력상 같은 (issuer, owner) 조합의 반복 매수인지 판단."""
+    """요구사항 4-b: 로컬 이력상 같은 (issuer, owner) 조합의 반복 매수인지 판단.
+
+    ``as_of``는 백테스트에서 과거 filing의 날짜 기준으로 lookback 창을 계산하기 위한 것으로,
+    생략하면 기존과 동일하게 ``date.today()`` 기준으로 동작합니다.
+    """
 
     occurrences = history.count_recent_purchases(
         owner_cik=owner.cik,
         issuer_cik=issuer_cik,
         lookback_days=settings.recurring_lookback_days,
+        as_of=as_of,
     )
     return occurrences >= settings.recurring_min_occurrences
 
@@ -78,6 +86,8 @@ def evaluate(
     issuer_cik: str,
     settings: Settings,
     history: HistoryStore,
+    *,
+    as_of: date | None = None,
 ) -> FilterResult:
     failed: list[str] = []
 
@@ -94,7 +104,7 @@ def evaluate(
         failed.append("Officer/Director가 아님 (10% Owner 또는 Other만 해당)")
     if is_10b5_1_plan_trade(txn):
         failed.append("Rule 10b5-1 사전 계획 거래")
-    if is_recurring_buyer(owner, issuer_cik, settings, history):
+    if is_recurring_buyer(owner, issuer_cik, settings, history, as_of=as_of):
         failed.append("최근 반복 매수 이력 존재")
 
     return FilterResult(passed=not failed, reasons_failed=tuple(failed))
