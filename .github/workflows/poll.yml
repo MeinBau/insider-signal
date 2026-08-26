@@ -1,0 +1,39 @@
+name: Insider Signal Poll
+
+on:
+  schedule:
+    # UTC 기준. 10:00 UTC = 19:00 KST, 22:00 UTC = 07:00 KST (필요시 시각 조정하세요)
+    - cron: "0 10 * * *"
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: insider-signal-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore local history DB
+        uses: actions/cache@v4
+        with:
+          path: data/insider_signal.db
+          key: insider-signal-history-${{ github.run_id }}
+          restore-keys: |
+            insider-signal-history-
+
+      - name: Run polling (once)
+        env:
+          SEC_EDGAR_CONTACT: ${{ secrets.SEC_EDGAR_CONTACT }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python -m insider_signal.cli run --once
