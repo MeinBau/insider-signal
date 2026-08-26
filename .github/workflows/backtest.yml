@@ -29,22 +29,23 @@ jobs:
       - name: Restore backtest checkpoint (재개용, EDGAR 재조회 방지)
         uses: actions/cache@v4
         with:
-          path: data/backtest_runs
-          key: insider-signal-backtest-${{ matrix.period.name }}-${{ github.run_id }}
+          path: data/backtest_runs_biowide
+          key: insider-signal-backtest-biowide-${{ matrix.period.name }}-${{ github.run_id }}
           restore-keys: |
-            insider-signal-backtest-${{ matrix.period.name }}-
+            insider-signal-backtest-biowide-${{ matrix.period.name }}-
 
-      - name: 백테스트 실행 (섹터별 target/stop 실험, --sector-experiment)
+      - name: 백테스트 실행 (섹터별 target/stop 실험, --sector-experiment, 바이오 SIC 확장 + 하한 완화)
         env:
           SEC_EDGAR_CONTACT: ${{ secrets.SEC_EDGAR_CONTACT }}
         run: |
           python -m insider_signal.cli backtest \
             --start ${{ matrix.period.start }} --end ${{ matrix.period.end }} \
-            --sector-experiment --progress-every 500
+            --sector-experiment --progress-every 500 \
+            --checkpoint-dir data/backtest_runs_biowide
 
       - uses: actions/upload-artifact@v4
         with:
-          name: backtest-${{ matrix.period.name }}
+          name: backtest-biowide-${{ matrix.period.name }}
           path: |
-            data/backtest_runs/${{ matrix.period.start }}_${{ matrix.period.end }}_sector_results.csv
-            data/backtest_runs/${{ matrix.period.start }}_${{ matrix.period.end }}_sector_results.sqlite3
+            data/backtest_runs_biowide/${{ matrix.period.start }}_${{ matrix.period.end }}_sector_results.csv
+            data/backtest_runs_biowide/${{ matrix.period.start }}_${{ matrix.period.end }}_sector_results.sqlite3
