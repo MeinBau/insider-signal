@@ -28,7 +28,7 @@ SEC_EDGAR_CONTACT = params.SecretParam("SEC_EDGAR_CONTACT")
 SLACK_WEBHOOK_URL = params.SecretParam("SLACK_WEBHOOK_URL")
 
 # .firebaserc의 프로젝트 ID와 짝을 맞춰야 함 (프로젝트 ID를 바꾸면 여기도 같이 바꿀 것).
-HISTORY_BUCKET_NAME = "insider-signal-mb01-history"
+HISTORY_BUCKET_NAME = "insider-signal-me01-history"
 HISTORY_BLOB_NAME = "insider_signal.db"
 
 logging.basicConfig(
