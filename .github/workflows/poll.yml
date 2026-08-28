@@ -2,7 +2,7 @@ name: Insider Signal Poll
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 매시 정각 (UTC 기준)
+    - cron: "7 * * * *"  # 매시 7분 (UTC 기준, 정각 고부하 시간대 회피)
   workflow_dispatch: {}
 
 concurrency:
