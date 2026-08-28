@@ -421,6 +421,7 @@ def enumerate_and_filter(
     include_amendments: bool = False,
     progress_every: int = 200,
     classify_sector: bool = False,
+    max_value_override: float | None = None,
 ) -> None:
     """분기 인덱스에서 열거한 filing을 filed_at 오름차순으로 순차 처리합니다.
 
@@ -450,6 +451,7 @@ def enumerate_and_filter(
                 settings=settings,
                 classify_sector=classify_sector,
                 issuer_sector_cache=issuer_sector_cache,
+                max_value_override=max_value_override,
             )
         if i % progress_every == 0:
             logger.info(
@@ -472,6 +474,7 @@ def _process_one_filing(
     settings: Settings,
     classify_sector: bool = False,
     issuer_sector_cache: dict[str, str | None] | None = None,
+    max_value_override: float | None = None,
 ) -> None:
     try:
         xml_url = client.get_primary_xml_url(ref.cik, ref.accession_no)
@@ -515,6 +518,7 @@ def _process_one_filing(
         result = filters.evaluate(
             txn, filing.owner, filing.issuer.cik, settings, history,
             as_of=ref.filed_at, min_value_override=min_value_override,
+            max_value_override=max_value_override,
         )
 
         if classify_sector and result.passed and not sector:
@@ -897,6 +901,7 @@ def run_backtest(
     include_amendments: bool = False,
     progress_every: int = 200,
     sector_overrides: dict[str, tuple[float, float]] | None = None,
+    max_value_override: float | None = None,
 ) -> BacktestReport:
     """cli.py의 ``backtest`` 서브커맨드가 호출하는 단일 진입점.
 
@@ -905,6 +910,10 @@ def run_backtest(
 
     ``sector_overrides``는 ``--sector-experiment`` 전용 (``sectors.SECTOR_TARGET_STOP``):
     바이오/금으로 분류된 신호는 target_pct/stop_pct 대신 이 값을 씁니다.
+
+    ``max_value_override``는 ``--max-value-override`` 전용: 거래금액 상한 $500,000이
+    신호 품질에 실제로 필요한지 검증하기 위한 것으로, 생략하면 기본값(``settings.max_txn_value_usd``)
+    그대로 동작합니다.
     """
 
     with HistoryStore(history_db_path) as history, BacktestStore(results_db_path) as store:
@@ -918,6 +927,7 @@ def run_backtest(
             include_amendments=include_amendments,
             progress_every=progress_every,
             classify_sector=sector_overrides is not None,
+            max_value_override=max_value_override,
         )
         run_price_simulations(
             store=store,

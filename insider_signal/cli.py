@@ -79,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
         "(미검증 가설치, 기본값은 그대로 --target-pct/--stop-pct 사용)",
     )
     bt_p.add_argument(
+        "--max-value-override", type=float, default=None,
+        help="거래금액 상한 실험용 override (기본: MAX_TXN_VALUE_USD=$500,000 그대로 사용). "
+        "예: --max-value-override 2000000 으로 $500k 상한이 신호 품질에 필요한지 검증. "
+        "라이브 poller와 --max-value-override 없는 기본 백테스트 경로에는 영향 없음.",
+    )
+    bt_p.add_argument(
         "--checkpoint-dir", type=Path, default=None,
         help="재개용 체크포인트/결과 DB 및 CSV 리포트를 저장할 디렉터리 (기본: data/backtest_runs/)",
     )
@@ -109,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         run_tag = f"{start.isoformat()}_{end.isoformat()}"
         if args.sector_experiment:
             run_tag += "_sector"
+        if args.max_value_override is not None:
+            run_tag += f"_maxoverride{int(args.max_value_override)}"
 
         report = run_backtest(
             client=client,
@@ -124,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             include_amendments=args.include_amendments,
             progress_every=args.progress_every,
             sector_overrides=SECTOR_TARGET_STOP if args.sector_experiment else None,
+            max_value_override=args.max_value_override,
         )
         print_summary(report)
         return 0

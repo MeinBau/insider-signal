@@ -29,17 +29,25 @@ def is_open_market_purchase(txn: Transaction) -> bool:
 
 
 def is_within_value_range(
-    txn: Transaction, settings: Settings, *, min_override: float | None = None
+    txn: Transaction,
+    settings: Settings,
+    *,
+    min_override: float | None = None,
+    max_override: float | None = None,
 ) -> bool:
     """요구사항 1: 10만 달러 ~ 50만 달러 거래만 사용.
 
     ``min_override``: 백테스트 섹터 실험(--sector-experiment) 전용. 바이오 이슈어에 한해
     완화된 하한을 실험적으로 적용할 때만 쓰이며, 라이브 poller와 기본 백테스트 경로는
     이 값을 넘기지 않으므로 CLAUDE.md에 명시된 기본 하한($100,000)이 그대로 유지된다.
+    ``max_override``: 백테스트 상한 실험(--max-value-override) 전용. 상한 $500,000이
+    신호 품질에 정말 필요한지 검증하기 위한 것으로, 마찬가지로 라이브 poller와 기본
+    백테스트 경로에는 영향을 주지 않는다.
     """
 
     min_value = min_override if min_override is not None else settings.min_txn_value_usd
-    return min_value <= txn.value_usd <= settings.max_txn_value_usd
+    max_value = max_override if max_override is not None else settings.max_txn_value_usd
+    return min_value <= txn.value_usd <= max_value
 
 
 def is_individual(owner: ReportingOwner) -> bool:
@@ -97,16 +105,20 @@ def evaluate(
     *,
     as_of: date | None = None,
     min_value_override: float | None = None,
+    max_value_override: float | None = None,
 ) -> FilterResult:
     failed: list[str] = []
 
     if not is_open_market_purchase(txn):
         failed.append("공개시장 매수(P/A)가 아님")
-    if not is_within_value_range(txn, settings, min_override=min_value_override):
+    if not is_within_value_range(
+        txn, settings, min_override=min_value_override, max_override=max_value_override
+    ):
         applied_min = min_value_override if min_value_override is not None else settings.min_txn_value_usd
+        applied_max = max_value_override if max_value_override is not None else settings.max_txn_value_usd
         failed.append(
             f"거래금액 ${txn.value_usd:,.0f}가 허용범위 "
-            f"(${applied_min:,.0f}~${settings.max_txn_value_usd:,.0f}) 밖"
+            f"(${applied_min:,.0f}~${applied_max:,.0f}) 밖"
         )
     if not is_individual(owner):
         failed.append("법인/펀드 등으로 추정되는 신고인 이름")
