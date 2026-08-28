@@ -1,7 +1,7 @@
 requests>=2.31,<3
 python-dotenv>=1.0,<2
-yfinance>=0.2,<1
 
-# Firebase Functions 배포 전용 (main.py에서만 사용, live poll/backtest 경로는 무관)
+# Firebase Functions 배포 전용 (main.py에서만 사용, live poll 경로 자체엔 불필요하지만
+# Cloud Functions Python 빌드팩이 소스 루트의 requirements.txt를 그대로 쓰므로 분리 불가)
 firebase-functions>=0.4,<1
 google-cloud-storage>=2.14,<3

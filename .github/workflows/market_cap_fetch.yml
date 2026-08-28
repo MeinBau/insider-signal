@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements-backtest.txt
 
       - run: python scripts/fetch_market_caps.py
 

@@ -1,2 +1,2 @@
--r requirements.txt
+-r requirements-backtest.txt
 pytest>=7.4,<9

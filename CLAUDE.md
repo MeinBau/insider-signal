@@ -126,9 +126,15 @@ filing index JSON에서 실제 XML 문서 URL 탐색 → XML 파싱 → 트랜�
 ## 코딩 컨벤션
 
 - Python 3.11+, 표준 라이브러리 우선 사용 (`xml.etree.ElementTree`, `sqlite3`, `dataclasses`).
-  외부 의존성은 `requests`, `python-dotenv`, (백테스트 전용) `yfinance` 정도로 최소화합니다.
-  `yfinance`/`pandas` import는 `price_data.py`에만 두고, `run` 커맨드 경로에서는 지연 import도
-  거치지 않게 유지하세요 (라이브 polling만 쓰는 사용자가 불필요한 의존성을 설치하지 않도록).
+  외부 의존성은 `requests`, `python-dotenv` 정도로 최소화합니다. `yfinance`(백테스트 전용)는
+  `requirements.txt`가 아니라 별도 `requirements-backtest.txt`(`-r requirements.txt` + `yfinance`)에
+  둡니다 — `requirements.txt`는 라이브 polling과 Firebase Cloud Functions 배포(`main.py`, Cloud
+  Functions Python 빌드팩이 소스 루트의 `requirements.txt`를 그대로 쓰기 때문에 분리 불가)가 공유하는
+  최소 의존성만 담아야 하고, 백테스트 전용 `yfinance`/`pandas`가 여기 섞이면 안 됩니다(배포 패키지가
+  불필요하게 커지고, 실제로 로컬 numpy 버전 문제로 배포가 깨진 적이 있음). 백테스트/개발 환경은
+  `pip install -r requirements-backtest.txt`(또는 `requirements-dev.txt`, 이걸 통해 연쇄 설치됨)로
+  설치하세요. `yfinance`/`pandas` import는 `price_data.py`에만 두고, `run` 커맨드 경로에서는 지연
+  import도 거치지 않게 유지하세요 (라이브 polling만 쓰는 사용자가 불필요한 의존성을 설치하지 않도록).
 - 타입 힌트를 항상 사용하고, 도메인 값(금액/개수)은 `Decimal` 대신 `float`로 다루되 금액 비교는
   정수 센트 단위 반올림 오차에 민감하지 않으므로 float로 충분합니다 (이미 큰 금액 단위 필터라 오차 무관).
 - 로그는 `logging` 모듈 사용, 알림 실패는 예외를 삼키지 말고 로그만 남기고 다음 항목으로 진행

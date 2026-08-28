@@ -14,7 +14,8 @@ env/
 data/
 tests/
 scripts/
+requirements-backtest.txt
+requirements-dev.txt
 README.md
 CLAUDE.md
 HARNESS.md
-requirements-dev.txt
